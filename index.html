@@ -51,6 +51,7 @@ ul.log li.bad { border-color: var(--bad); }
 ul.log small { display: block; color: var(--muted); }
 #flash { position: fixed; inset: 0; background: #000; z-index: 50; display: grid; place-items: end center; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
 #flash[hidden] { display: none; }
+#lamp { position: absolute; left: 50%; top: 45%; transform: translate(-50%, -50%); background: #000; }
 #flash .hud { color: #666; font-size: 13px; background: #000; padding: 6px 10px; border-radius: 8px; }
 [hidden] { display: none !important; }
 </style>
@@ -59,7 +60,7 @@ ul.log small { display: block; color: var(--muted); }
 <main>
   <div>
     <h1>אור שקט</h1>
-    <p class="sub">גרסה 8 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
+    <p class="sub">גרסה 9 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
   </div>
 
   <div class="tabs" role="tablist">
@@ -78,6 +79,8 @@ ul.log small { display: block; color: var(--muted); }
       <label for="source" style="flex:1">מקור אור
         <select id="source">
           <option value="screen">מסך (כל מכשיר)</option>
+          <option value="small">ריבוע קטן, 2 ס"מ (מדמה בערך פי 10 מרחק)</option>
+          <option value="tiny">ריבוע זעיר, 0.5 ס"מ (מדמה בערך פי 40 מרחק)</option>
           <option value="torch">פנס (אנדרואיד בלבד, ניסיוני)</option>
         </select>
       </label>
@@ -113,7 +116,7 @@ ul.log small { display: block; color: var(--muted); }
   </section>
 </main>
 
-<div id="flash" hidden><div class="hud" id="hud"></div></div>
+<div id="flash" hidden><div id="lamp" hidden></div><div class="hud" id="hud"></div></div>
 
 <script id="core">
 // ---- Protocol (pure, no DOM) ----
@@ -323,6 +326,14 @@ async function startSend() {
   }
   const flash = $("flash");
   flash.hidden = false;
+  const lamp = $("lamp"), src = $("source").value;
+  // CSS sizes are only roughly physical (96px per inch), good enough to fake distance
+  if (!setLight && (src === "small" || src === "tiny")) {
+    const px = src === "small" ? 76 : 19;
+    lamp.style.width = lamp.style.height = px + "px";
+    lamp.hidden = false;
+    setLight = on => { lamp.style.background = on ? "#fff" : "#000"; };
+  }
   if (!setLight) setLight = on => { flash.style.background = on ? "#fff" : "#000"; };
   let wake = null;
   try { wake = await navigator.wakeLock.request("screen"); } catch (e) {}
@@ -335,7 +346,7 @@ async function startSend() {
     if (torchTrack) torchTrack.stop();
     try { wake && wake.release(); } catch (e) {}
     try { document.fullscreenElement && document.exitFullscreen(); } catch (e) {}
-    flash.hidden = true; flash.style.background = "#000";
+    flash.hidden = true; flash.style.background = "#000"; lamp.hidden = true; lamp.style.background = "#000";
     sending = null;
   };
   sending = { stop, gaps: [], lastNow: 0 };
