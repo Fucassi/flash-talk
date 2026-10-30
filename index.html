@@ -59,7 +59,7 @@ ul.log small { display: block; color: var(--muted); }
 <main>
   <div>
     <h1>אור שקט</h1>
-    <p class="sub">גרסה 3 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
+    <p class="sub">גרסה 4 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
   </div>
 
   <div class="tabs" role="tablist">
@@ -365,7 +365,9 @@ async function startRecv() {
     assembler.symbol(s);
   });
   // Tap the video to lock onto the light (useful when there is another light in the room). Tap again to release.
-  let spot = null, prevMaxes = null;
+  let spot = null, prevMeans = null, base = null, prevMaxes = null, channel = "m";
+  const actMax = new Float32Array((cv.width / 8) * (cv.height / 8));
+  const cand = new Uint8Array((cv.width / 8) * (cv.height / 8));
 
   const activity = new Float32Array((cv.width / 8) * (cv.height / 8));
   function showMarker(a) {
@@ -397,31 +399,54 @@ async function startRecv() {
     const t = now;
     ctx.drawImage(video, 0, 0, cv.width, cv.height);
     const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
-    // Find the flashing light: split the image into 8x8-pixel blocks and track each block's brightest pixel.
-    // Blocks whose value keeps changing get weight; steady lights (monitors, lamps) get almost none.
-    const BW = cv.width / 8, BH = cv.height / 8, maxes = new Float32Array(BW * BH);
+    // Find the flashing light: split the image into 8x8-pixel blocks and track each block's average brightness.
+    // Blocks whose brightness keeps changing are "candidates"; steady lights (monitors, lamps) never are.
+    // Signal = average change of the candidate blocks from their own slow baseline, so steady parts cancel out.
+    // A second signal, the brightest pixel among blocks that flicker, catches a small, far light
+    // that the block averages would dilute. Each frame we use whichever signal has more contrast.
+    const BW = cv.width / 8, BH = cv.height / 8, means = new Float32Array(BW * BH), maxes = new Float32Array(BW * BH);
     for (let i = 0; i < d.length; i += 4) {
       const px = (i / 4) % cv.width, py = Math.floor(i / 4 / cv.width), k = Math.floor(py / 8) * BW + Math.floor(px / 8);
       const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      means[k] += y / 64;
       if (y > maxes[k]) maxes[k] = y;
     }
-    if (prevMaxes) for (let k = 0; k < maxes.length; k++) activity[k] = activity[k] * 0.99 + Math.abs(maxes[k] - prevMaxes[k]);
+    if (prevMaxes) for (let k = 0; k < maxes.length; k++) actMax[k] = actMax[k] * 0.99 + Math.abs(maxes[k] - prevMaxes[k]);
     prevMaxes = maxes;
-    // Candidates: blocks with at least 30% of the top activity (a shaking light moves across several blocks).
-    // Signal: the brightest candidate.
-    let bestK = -1;
+    if (!base) base = Float32Array.from(means);
+    if (prevMeans) for (let k = 0; k < means.length; k++) activity[k] = activity[k] * 0.99 + Math.abs(means[k] - prevMeans[k]);
+    prevMeans = means;
     const inSpot = k => !spot || (Math.abs((k % BW) * 8 + 4 - spot.x) <= 12 && Math.abs(Math.floor(k / BW) * 8 + 4 - spot.y) <= 12);
-    for (let k = 0; k < maxes.length; k++) if (inSpot(k) && (bestK < 0 || activity[k] > activity[bestK])) bestK = k;
-    let b = 0;
-    for (let k = 0; k < maxes.length; k++) if (inSpot(k) && activity[k] >= activity[bestK] * 0.3 && maxes[k] > b) b = maxes[k];
-    const area = activity[bestK] > 300 ? { x: (bestK % BW) * 8 + 4, y: Math.floor(bestK / BW) * 8 + 4 } : null;
+    let bestK = -1;
+    for (let k = 0; k < means.length; k++) if (inSpot(k) && (bestK < 0 || activity[k] > activity[bestK])) bestK = k;
+    let sum = 0, n = 0;
+    for (let k = 0; k < means.length; k++) {
+      // join at 30% of the top activity, leave below 15% (stops blocks flickering in and out)
+      const a = activity[k] / (activity[bestK] || 1);
+      if (!inSpot(k)) cand[k] = 0; else if (a >= 0.3) cand[k] = 1; else if (a < 0.15) cand[k] = 0;
+      if (cand[k]) { sum += means[k] - base[k]; n++; }
+      base[k] = base[k] * 0.995 + means[k] * 0.005;
+    }
+    const bMean = 128 + (n ? sum / n : 0);
+    let bestM = -1, bMax = 0;
+    for (let k = 0; k < maxes.length; k++) if (inSpot(k) && (bestM < 0 || actMax[k] > actMax[bestM])) bestM = k;
+    for (let k = 0; k < maxes.length; k++) if (inSpot(k) && actMax[k] >= actMax[bestM] * 0.3 && maxes[k] > bMax) bMax = maxes[k];
+    const area = activity[bestK] > 40 ? { x: (bestK % BW) * 8 + 4, y: Math.floor(bestK / BW) * 8 + 4 } : null;
     if (!spot) showMarker(area);
-    hist.push({ t, b });
+    hist.push({ t, m: bMean, x: bMax });
     while (hist.length && hist[0].t < t - 4000) hist.shift();
-    const sorted = hist.map(h => h.b).sort((a, c) => a - c);
-    const lo = sorted[Math.floor(sorted.length * 0.05)], hi = sorted[Math.floor(sorted.length * 0.95)];
+    const range = key => {
+      const s = hist.map(h => h[key]).sort((a, c) => a - c);
+      return [s[Math.floor(s.length * 0.05)], s[Math.floor(s.length * 0.95)]];
+    };
+    const rm = range("m"), rx = range("x");
+    const cm = rm[1] - rm[0], cx = rx[1] - rx[0];
+    // switch channel only on a clear win, so a message is not cut by flip-flopping
+    if (channel === "m" && cx > cm * 1.5) channel = "x"; else if (channel === "x" && cm > cx * 1.5) channel = "m";
+    const b = channel === "m" ? bMean : bMax;
+    const [lo, hi] = channel === "m" ? rm : rx;
     const contrast = hi - lo;
-    if (contrast > 25) {
+    if (contrast > 8) {
       const thr = (lo + hi) / 2, hyst = contrast * 0.1;
       if (level === 0 && b > thr + hyst) level = 1;
       else if (level === 1 && b < thr - hyst) level = 0;
@@ -435,8 +460,8 @@ async function startRecv() {
     if (frameTimes.length % 5 === 0) {
       $("sFps").textContent = frameTimes.length;
       $("sContrast").textContent = Math.round(contrast);
-      if (contrast <= 25 && $("sState").textContent === "ממתין") $("sState").textContent = "אין אות";
-      $("diag").textContent = `בהירות ${Math.round(b)} (טווח ${Math.round(lo)}–${Math.round(hi)}) · מעברים ${nFlips} · סמלים ${nSym} · שגיאות מסגרת ${nFrame} · זוגיות ${nParity} · ${spot ? "נעול ידנית" : area ? "נעילה אוטומטית" : "מחפש הבהוב"} · ${vfc ? "vfc" : "raf"}`;
+      if (contrast <= 8 && $("sState").textContent === "ממתין") $("sState").textContent = "אין אות";
+      $("diag").textContent = `בהירות ${Math.round(b)} (טווח ${Math.round(lo)}–${Math.round(hi)}) · מעברים ${nFlips} · סמלים ${nSym} · שגיאות מסגרת ${nFrame} · זוגיות ${nParity} · ${spot ? "נעול ידנית" : area ? "נעילה אוטומטית" : "מחפש הבהוב"} · ${channel === "m" ? "ממוצע" : "שיא"} · ${vfc ? "vfc" : "raf"}`;
     }
     drawGraph(graph);
     schedule();
