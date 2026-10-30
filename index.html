@@ -59,7 +59,7 @@ ul.log small { display: block; color: var(--muted); }
 <main>
   <div>
     <h1>אור שקט</h1>
-    <p class="sub">גרסה 7 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
+    <p class="sub">גרסה 8 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
   </div>
 
   <div class="tabs" role="tablist">
@@ -159,7 +159,7 @@ const FT = (() => {
     let t = 1600 + Math.max(1000, 10 * T);
     for (const c of codes) for (const b of symbolBits(c)) { seg.push({ t, on: b }); t += T; }
     seg.push({ t, on: 0 });
-    return { seg, total: t + 500 };
+    return { seg, total: t + Math.max(500, 10 * T) };
   }
 
   function levelAt(sched, ms) {
@@ -169,45 +169,70 @@ const FT = (() => {
   }
 
   // Streaming decoder. Feed it (timeMs, level 0/1) samples in time order.
+  // Works on run lengths: each on/off stretch is converted to a whole number of bits.
+  // Real cameras and screens stretch "on" and shorten "off" by a steady amount, so that bias is
+  // measured from the runs themselves and removed before rounding.
   function Decoder(T, onSymbol) {
-    const samples = [];       // {t, v}
-    let searchFrom = -Infinity, lastV = 0, lastT = null;
-    function valueAt(t) {
-      // nearest sample in time
-      let best = null, bd = Infinity;
-      for (let i = samples.length - 1; i >= 0; i--) {
-        const d = Math.abs(samples[i].t - t);
-        if (d < bd) { bd = d; best = samples[i]; }
-        if (samples[i].t < t - 4 * T) break;
-      }
-      return best ? best.v : 0;
-    }
-    let pendingEdge = null;
-    return {
-      push(t, v) {
-        samples.push({ t, v });
-        while (samples.length && samples[0].t < t - 30 * T) samples.shift();
-        if (pendingEdge === null && lastT !== null && lastV === 0 && v === 1) {
-          const te = (lastT + t) / 2;
-          if (te >= searchFrom) pendingEdge = te;
-        }
-        lastV = v; lastT = t;
-        if (pendingEdge !== null && t >= pendingEdge + 8.5 * T + T * 0.3) {
-          const te = pendingEdge; pendingEdge = null;
-          const bits = [];
-          for (let k = 1; k <= 8; k++) bits.push(valueAt(te + (k + 0.5) * T));
-          if (bits[7] !== 0) { searchFrom = te + 0.5 * T; onSymbol({ framing: true }); return; }
+    let lastV = 0, lastT = null, runStart = null, flushed = false;
+    let bias = 0;                // how much longer "on" looks than it is, in bit-times
+    let state = "idle", bits = [];
+    function feedBits(v, n) {
+      for (let i = 0; i < n; i++) {
+        if (state === "idle") { if (v === 1) { state = "sym"; bits = []; } continue; }
+        bits.push(v);
+        if (bits.length === 8) {
+          state = "idle";
+          if (bits[7] !== 0) { onSymbol({ framing: true }); continue; }
           let code = 0;
           for (let k = 0; k < 6; k++) code = (code << 1) | bits[k];
           onSymbol({ code, parityOk: parity(code) === bits[6] });
-          searchFrom = te + 8.5 * T;
-          // the next start edge may already have happened between te+8.5T and now
-          for (let i = 1; i < samples.length; i++) {
-            const a = samples[i - 1], b = samples[i];
-            if (a.v === 0 && b.v === 1 && (a.t + b.t) / 2 >= searchFrom) { pendingEdge = (a.t + b.t) / 2; break; }
-          }
         }
       }
+    }
+    function endRun(v, dur) {
+      const x = dur / T;
+      if (x < 6) {               // learn the bias from short runs only (long ones are idle gaps)
+        const f = v ? x - Math.round(x - bias) : -(x - Math.round(x + bias));
+        bias = Math.max(-0.45, Math.min(0.45, bias * 0.9 + f * 0.1));
+      }
+      let n = Math.round(v ? x - bias : x + bias);
+      if (n < 1) n = 1;
+      feedBits(v, Math.min(n, 12));
+    }
+    const win = [];               // last 3 samples: a median of 3 removes single-frame flickers
+    // Runs shorter than half a bit are flickers: merge them with the runs on both sides.
+    const queue = [];
+    const short = r => (r.v ? r.dur - bias * T : r.dur + bias * T) < 0.5 * T;
+    function addRun(v, dur, final) {
+      queue.push({ v, dur });
+      for (;;) {
+        if (queue.length >= 3 && short(queue[1])) {
+          queue.splice(0, 3, { v: queue[0].v, dur: queue[0].dur + queue[1].dur + queue[2].dur });
+          continue;
+        }
+        if (queue.length >= 2 && !short(queue[1])) { const r = queue.shift(); endRun(r.v, r.dur); continue; }
+        break;
+      }
+      if (final) while (queue.length) { const r = queue.shift(); endRun(r.v, r.dur); }
+    }
+    return {
+      push(tIn, vIn) {
+        win.push({ t: tIn, v: vIn });
+        if (win.length > 3) win.shift();
+        if (win.length < 3) return;
+        const t = win[1].t, v = (win[0].v + win[1].v + win[2].v) >= 2 ? 1 : 0;
+        if (lastT === null) { lastT = t; lastV = v; runStart = t; return; }
+        if (v !== lastV) {
+          const edge = (lastT + t) / 2;
+          if (!flushed) addRun(lastV, edge - runStart, false);
+          runStart = edge; flushed = false;
+        } else if (v === 0 && !flushed && t - runStart > 9 * T) {
+          addRun(0, t - runStart, true);    // long dark gap: finish any symbol still waiting for its last zeros
+          flushed = true;
+        }
+        lastV = v; lastT = t;
+      },
+      get bias() { return bias; }
     };
   }
 
@@ -474,7 +499,7 @@ async function startRecv() {
       $("sFps").textContent = frameTimes.length;
       $("sContrast").textContent = Math.round(contrast);
       if (contrast <= 8 && $("sState").textContent === "ממתין") $("sState").textContent = "אין אות";
-      $("runs").textContent = "אורכי הבהובים (ב-ביטים, ד=דלוק, כ=כבוי): " + runs.slice().reverse().join("  ") + ` · שעון: ${clockSrc}`;
+      $("runs").textContent = "אורכי הבהובים (ב-ביטים, ד=דלוק, כ=כבוי): " + runs.slice().reverse().join("  ") + ` · שעון: ${clockSrc} · הטיה ${decoder.bias.toFixed(2)}`;
       $("diag").textContent = `בהירות ${Math.round(b)} (טווח ${Math.round(lo)}–${Math.round(hi)}) · מעברים ${nFlips} · סמלים ${nSym} · שגיאות מסגרת ${nFrame} · זוגיות ${nParity} · ${spot ? "נעול ידנית" : area ? "נעילה אוטומטית" : "מחפש הבהוב"} · ${channel === "m" ? "ממוצע" : "שיא"} · ${vfc ? "vfc" : "raf"}`;
     }
     drawGraph(graph);
