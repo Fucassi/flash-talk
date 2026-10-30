@@ -59,7 +59,7 @@ ul.log small { display: block; color: var(--muted); }
 <main>
   <div>
     <h1>אור שקט</h1>
-    <p class="sub">גרסה 6 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
+    <p class="sub">גרסה 7 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
   </div>
 
   <div class="tabs" role="tablist">
@@ -455,7 +455,7 @@ async function startRecv() {
     const [lo, hi] = channel === "m" ? rm : rx;
     const contrast = hi - lo;
     if (contrast > 8) {
-      const thr = (lo + hi) / 2, hyst = contrast * 0.1;
+      const thr = (lo + hi) / 2, hyst = contrast * 0.2;
       if (level === 0 && b > thr + hyst) level = 1;
       else if (level === 1 && b < thr - hyst) level = 0;
     } else level = 0;
