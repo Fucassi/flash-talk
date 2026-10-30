@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>אור שקט</title>
+<style>
+:root {
+  --bg: #f3f4f6; --fg: #15171c; --muted: #5d6370; --card: #ffffff; --line: #d9dce3;
+  --accent: #c27a00; --ok: #1f7a46; --bad: #b3261e;
+  --font: "Assistant", "Segoe UI", system-ui, sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #0d0f13; --fg: #e8eaef; --muted: #9097a5; --card: #171a21; --line: #2a2f3a;
+          --accent: #f0a63a; --ok: #4cc27f; --bad: #ff7a70; color-scheme: dark; }
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.5 var(--font);
+  padding: max(12px, env(safe-area-inset-top)) max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left)); }
+main { max-width: 560px; margin: 0 auto; display: grid; gap: 14px; }
+h1 { margin: 0; font-size: 24px; }
+.sub { margin: 0; color: var(--muted); font-size: 14px; }
+.tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 4px; }
+.tabs button { border: 0; background: transparent; color: var(--fg); font: inherit; font-weight: 600; padding: 10px; border-radius: 9px; }
+.tabs button[aria-selected="true"] { background: var(--accent); color: #000; }
+section.card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: grid; gap: 12px; }
+label { font-size: 14px; color: var(--muted); display: grid; gap: 4px; }
+textarea, select { font: inherit; color: var(--fg); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; width: 100%; }
+textarea { min-height: 84px; resize: vertical; }
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btn { font: inherit; font-weight: 700; border: 0; border-radius: 10px; padding: 12px 18px; background: var(--accent); color: #000; }
+.btn.secondary { background: transparent; color: var(--fg); border: 1px solid var(--line); }
+.btn:disabled { opacity: .45; }
+.note { font-size: 13px; color: var(--muted); margin: 0; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; font-variant-numeric: tabular-nums; }
+.stat { border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; }
+.stat b { display: block; font-size: 18px; }
+.stat span { font-size: 12px; color: var(--muted); }
+video { width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px; background: #000; }
+canvas#graph { width: 100%; height: 70px; border-radius: 8px; background: var(--bg); border: 1px solid var(--line); }
+.live { min-height: 48px; font-size: 20px; padding: 10px; border-radius: 8px; background: var(--bg); border: 1px dashed var(--line); word-break: break-word; }
+.live .err { color: var(--bad); text-decoration: underline wavy; }
+ul.log { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+ul.log li { padding: 8px 10px; border-radius: 8px; background: var(--bg); border-inline-start: 4px solid var(--line); }
+ul.log li.ok { border-color: var(--ok); }
+ul.log li.bad { border-color: var(--bad); }
+ul.log small { display: block; color: var(--muted); }
+#flash { position: fixed; inset: 0; background: #000; z-index: 50; display: grid; place-items: end center; padding-bottom: max(20px, env(safe-area-inset-bottom)); }
+#flash[hidden] { display: none; }
+#flash .hud { color: #666; font-size: 13px; background: #000; padding: 6px 10px; border-radius: 8px; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <div>
+    <h1>אור שקט</h1>
+    <p class="sub">אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
+  </div>
+
+  <div class="tabs" role="tablist">
+    <button id="tabSend" role="tab" aria-selected="true">שליחה</button>
+    <button id="tabRecv" role="tab" aria-selected="false">קבלה</button>
+  </div>
+
+  <section class="card" id="paneSend">
+    <label for="msg">הודעה
+      <textarea id="msg" maxlength="200">נפגשים בעוד עשר דקות ליד העץ</textarea>
+    </label>
+    <div class="row">
+      <label for="speedSend" style="flex:1">מהירות (חייבת להיות זהה בשני המכשירים)
+        <select id="speedSend"></select>
+      </label>
+      <label for="source" style="flex:1">מקור אור
+        <select id="source">
+          <option value="screen">מסך (כל מכשיר)</option>
+          <option value="torch">פנס (אנדרואיד בלבד, ניסיוני)</option>
+        </select>
+      </label>
+    </div>
+    <p class="note" id="estimate"></p>
+    <div class="row">
+      <button class="btn" id="btnSend">שלח</button>
+      <label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="repeat"> לחזור בלולאה</label>
+    </div>
+    <p class="note">במצב מסך: הגבר בהירות למקסימום, כבה מצב לילה ו-True Tone, והחזק את המסך מול המצלמה של המקבל. לעצירה הקש על המסך.</p>
+  </section>
+
+  <section class="card" id="paneRecv" hidden>
+    <div class="row">
+      <label for="speedRecv" style="flex:1">מהירות
+        <select id="speedRecv"></select>
+      </label>
+      <button class="btn" id="btnCam">הפעל מצלמה</button>
+    </div>
+    <video id="video" playsinline muted></video>
+    <canvas id="graph" width="600" height="70"></canvas>
+    <div class="stats">
+      <div class="stat"><b id="sFps">0</b><span>פריימים/שנייה</span></div>
+      <div class="stat"><b id="sContrast">0</b><span>ניגודיות</span></div>
+      <div class="stat"><b id="sState">ממתין</b><span>מצב</span></div>
+    </div>
+    <div class="live" id="live" aria-live="polite"></div>
+    <ul class="log" id="log"></ul>
+    <p class="note">כוון את המצלמה לאור. בחושך האור יהיה הדבר הבהיר ביותר בתמונה, אז לא צריך לכוון בדיוק. מתחת ל-20 פריימים בשנייה כדאי לבחור מהירות איטית יותר.</p>
+  </section>
+</main>
+
+<div id="flash" hidden><div class="hud" id="hud"></div></div>
+
+<script id="core">
+// ---- Protocol (pure, no DOM) ----
+// Each symbol: start bit (ON), 6 data bits MSB first, even parity bit, stop bit (OFF) = 9 bit-times.
+// Message: START, chars..., END, checksum(sum of codes mod 64). Not Morse: a custom 6-bit alphabet.
+const FT = (() => {
+  const SHARED = " .,?!-0123456789";            // codes 1..16 in both modes
+  const HE = "אבגדהוזחטיכךלמםנןסעפףצץקרשת";     // codes 17..43 in Hebrew mode
+  const EN = "abcdefghijklmnopqrstuvwxyz";      // codes 17..42 in English mode
+  const TOGGLE = 61, END = 62, START = 63, BITS = 9;
+
+  function encode(text) {
+    const codes = [START];
+    let mode = "he";
+    for (const ch of text.toLowerCase()) {
+      let i = SHARED.indexOf(ch);
+      if (i >= 0) { codes.push(1 + i); continue; }
+      const inHe = HE.indexOf(ch), inEn = EN.indexOf(ch);
+      if (inHe < 0 && inEn < 0) continue;       // unsupported characters are dropped
+      const want = inHe >= 0 ? "he" : "en";
+      if (want !== mode) { codes.push(TOGGLE); mode = want; }
+      codes.push(17 + (want === "he" ? inHe : inEn));
+    }
+    let sum = 0;
+    for (const c of codes.slice(1)) sum += c;
+    codes.push(END, sum % 64);
+    return codes;
+  }
+
+  function parity(code) { let p = 0; for (let i = 0; i < 6; i++) p ^= (code >> i) & 1; return p; }
+
+  function symbolBits(code) {
+    const bits = [1];
+    for (let i = 5; i >= 0; i--) bits.push((code >> i) & 1);
+    bits.push(parity(code), 0);
+    return bits;
+  }
+
+  // Light schedule: [{t0 (ms from start), on}] segments. Calibration pulse, then a dark gap, then symbols.
+  function schedule(codes, T) {
+    const seg = [];
+    seg.push({ t: 0, on: 0 }, { t: 600, on: 1 }, { t: 1600, on: 0 });
+    let t = 1600 + Math.max(1000, 10 * T);
+    for (const c of codes) for (const b of symbolBits(c)) { seg.push({ t, on: b }); t += T; }
+    seg.push({ t, on: 0 });
+    return { seg, total: t + 500 };
+  }
+
+  function levelAt(sched, ms) {
+    let on = 0;
+    for (const s of sched.seg) { if (s.t <= ms) on = s.on; else break; }
+    return on;
+  }
+
+  // Streaming decoder. Feed it (timeMs, level 0/1) samples in time order.
+  function Decoder(T, onSymbol) {
+    const samples = [];       // {t, v}
+    let searchFrom = -Infinity, lastV = 0, lastT = null;
+    function valueAt(t) {
+      // nearest sample in time
+      let best = null, bd = Infinity;
+      for (let i = samples.length - 1; i >= 0; i--) {
+        const d = Math.abs(samples[i].t - t);
+        if (d < bd) { bd = d; best = samples[i]; }
+        if (samples[i].t < t - 4 * T) break;
+      }
+      return best ? best.v : 0;
+    }
+    let pendingEdge = null;
+    return {
+      push(t, v) {
+        samples.push({ t, v });
+        while (samples.length && samples[0].t < t - 30 * T) samples.shift();
+        if (pendingEdge === null && lastT !== null && lastV === 0 && v === 1) {
+          const te = (lastT + t) / 2;
+          if (te >= searchFrom) pendingEdge = te;
+        }
+        lastV = v; lastT = t;
+        if (pendingEdge !== null && t >= pendingEdge + 8.5 * T + T * 0.3) {
+          const te = pendingEdge; pendingEdge = null;
+          const bits = [];
+          for (let k = 1; k <= 8; k++) bits.push(valueAt(te + (k + 0.5) * T));
+          if (bits[7] !== 0) { searchFrom = te + 0.5 * T; onSymbol({ framing: true }); return; }
+          let code = 0;
+          for (let k = 0; k < 6; k++) code = (code << 1) | bits[k];
+          onSymbol({ code, parityOk: parity(code) === bits[6] });
+          searchFrom = te + 8.5 * T;
+          // the next start edge may already have happened between te+8.5T and now
+          for (let i = 1; i < samples.length; i++) {
+            const a = samples[i - 1], b = samples[i];
+            if (a.v === 0 && b.v === 1 && (a.t + b.t) / 2 >= searchFrom) { pendingEdge = (a.t + b.t) / 2; break; }
+          }
+        }
+      }
+    };
+  }
+
+  // Turns symbols into messages.
+  function Assembler(handlers) {
+    let active = false, mode = "he", sum = 0, chars = [], expectSum = false;
+    return {
+      symbol(s) {
+        if (s.framing) return;
+        const c = s.code;
+        if (c === START) { active = true; mode = "he"; sum = 0; chars = []; expectSum = false; handlers.update(chars); return; }
+        if (!active) return;
+        if (expectSum) {
+          active = false;
+          handlers.done({ text: chars.map(x => x.ch).join(""), ok: c === sum % 64, chars });
+          return;
+        }
+        if (c === END) { expectSum = true; return; }
+        sum += c;
+        if (c === TOGGLE) { mode = mode === "he" ? "en" : "he"; return; }
+        let ch = "�";
+        if (c >= 1 && c <= 16) ch = SHARED[c - 1];
+        else if (c >= 17) ch = (mode === "he" ? HE : EN)[c - 17] || "�";
+        chars.push({ ch, ok: s.parityOk });
+        handlers.update(chars);
+      }
+    };
+  }
+
+  return { encode, schedule, levelAt, Decoder, Assembler, BITS };
+})();
+if (typeof module !== "undefined") module.exports = FT;
+</script>
+
+<script>
+const $ = id => document.getElementById(id);
+const SPEEDS = [[250, "איטי: 250ms לביט"], [150, "רגיל: 150ms לביט"], [100, "מהיר: 100ms לביט"], [70, "מהיר מאוד: 70ms לביט (צריך 60fps)"]];
+for (const sel of [$("speedSend"), $("speedRecv")]) {
+  for (const [v, l] of SPEEDS) sel.add(new Option(l, v));
+  sel.value = "150";
+}
+try { const s = localStorage.getItem("ft-speed"); if (s) { $("speedSend").value = s; $("speedRecv").value = s; } } catch (e) {}
+function syncSpeed(e) {
+  $("speedSend").value = $("speedRecv").value = e.target.value;
+  try { localStorage.setItem("ft-speed", e.target.value); } catch (err) {}
+  updateEstimate();
+}
+$("speedSend").onchange = $("speedRecv").onchange = syncSpeed;
+
+function showTab(recv) {
+  $("tabSend").setAttribute("aria-selected", !recv);
+  $("tabRecv").setAttribute("aria-selected", recv);
+  $("paneSend").hidden = recv; $("paneRecv").hidden = !recv;
+}
+$("tabSend").onclick = () => showTab(false);
+$("tabRecv").onclick = () => showTab(true);
+
+function updateEstimate() {
+  const T = +$("speedSend").value;
+  const codes = FT.encode($("msg").value);
+  const secs = FT.schedule(codes, T).total / 1000;
+  $("estimate").textContent = `${codes.length - 3} סמלים, בערך ${secs.toFixed(1)} שניות שליחה (${(1000 / (T * FT.BITS)).toFixed(1)} תווים בשנייה).`;
+}
+$("msg").oninput = updateEstimate;
+updateEstimate();
+
+// ---- Sender ----
+let sending = null;
+async function startSend() {
+  const T = +$("speedSend").value;
+  const sched = FT.schedule(FT.encode($("msg").value), T);
+  let setLight;
+  let torchTrack = null;
+  if ($("source").value === "torch") {
+    try {
+      const st = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+      torchTrack = st.getVideoTracks()[0];
+      const caps = torchTrack.getCapabilities ? torchTrack.getCapabilities() : {};
+      if (!caps.torch) throw new Error("no torch");
+      let cur = null;
+      setLight = on => { if (on !== cur) { cur = on; torchTrack.applyConstraints({ advanced: [{ torch: !!on }] }).catch(() => {}); } };
+    } catch (e) {
+      if (torchTrack) torchTrack.stop();
+      alertNote("הדפדפן לא מאפשר שליטה בפנס במכשיר הזה. עובר למצב מסך.");
+      $("source").value = "screen";
+      torchTrack = null;
+    }
+  }
+  const flash = $("flash");
+  flash.hidden = false;
+  if (!setLight) setLight = on => { flash.style.background = on ? "#fff" : "#000"; };
+  let wake = null;
+  try { wake = await navigator.wakeLock.request("screen"); } catch (e) {}
+  try { await flash.requestFullscreen?.(); } catch (e) {}
+  let t0 = performance.now();
+  const stop = () => {
+    if (!sending) return;
+    cancelAnimationFrame(sending.raf);
+    setLight(0);
+    if (torchTrack) torchTrack.stop();
+    try { wake && wake.release(); } catch (e) {}
+    try { document.fullscreenElement && document.exitFullscreen(); } catch (e) {}
+    flash.hidden = true; flash.style.background = "#000";
+    sending = null;
+  };
+  sending = { stop };
+  flash.onclick = stop;
+  const loop = now => {
+    let ms = now - t0;
+    if (ms > sched.total) {
+      if ($("repeat").checked) { t0 = now; ms = 0; } else { stop(); return; }
+    }
+    setLight(FT.levelAt(sched, ms));
+    $("hud").textContent = `${Math.min(100, Math.round(ms / sched.total * 100))}% · הקש לעצירה`;
+    sending.raf = requestAnimationFrame(loop);
+  };
+  sending.raf = requestAnimationFrame(loop);
+}
+$("btnSend").onclick = () => sending ? sending.stop() : startSend();
+function alertNote(text) { $("estimate").textContent = text; }
+
+// ---- Receiver ----
+let recv = null;
+async function startRecv() {
+  if (recv) { recv.stop(); return; }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: { facingMode: "environment", frameRate: { ideal: 60 }, width: { ideal: 640 }, height: { ideal: 480 } }
+    });
+  } catch (e) {
+    $("sState").textContent = "אין מצלמה";
+    $("live").textContent = "לא התקבלה גישה למצלמה. בדוק שהדף נפתח בכתובת https ושאישרת גישה.";
+    return;
+  }
+  const video = $("video");
+  video.srcObject = stream;
+  await video.play();
+  $("btnCam").textContent = "עצור מצלמה";
+  const T = +$("speedRecv").value;
+  const cv = document.createElement("canvas");
+  cv.width = 96; cv.height = 72;
+  const ctx = cv.getContext("2d", { willReadFrequently: true });
+  const hist = [];           // recent brightness values {t, b}
+  const graph = [];          // for drawing
+  const frameTimes = [];
+  const assembler = FT.Assembler({
+    update(chars) { renderLive(chars); $("sState").textContent = "קולט"; },
+    done(m) { addLog(m); renderLive([]); $("sState").textContent = m.ok ? "התקבל" : "שגיאה"; }
+  });
+  const decoder = FT.Decoder(T, s => assembler.symbol(s));
+  let level = 0, running = true;
+  const vfc = "requestVideoFrameCallback" in HTMLVideoElement.prototype;
+  function onFrame(now, meta) {
+    if (!running) return;
+    const t = meta && meta.mediaTime !== undefined ? meta.mediaTime * 1000 : now;
+    ctx.drawImage(video, 0, 0, cv.width, cv.height);
+    const d = ctx.getImageData(0, 0, cv.width, cv.height).data;
+    // brightness = mean of the 12 brightest pixels (the light is the brightest thing in the dark)
+    const top = new Array(12).fill(0);
+    for (let i = 0; i < d.length; i += 4) {
+      const y = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+      if (y > top[11]) { top[11] = y; top.sort((a, b) => b - a); }
+    }
+    const b = top.reduce((a, x) => a + x, 0) / top.length;
+    hist.push({ t, b });
+    while (hist.length && hist[0].t < t - 4000) hist.shift();
+    const sorted = hist.map(h => h.b).sort((a, c) => a - c);
+    const lo = sorted[Math.floor(sorted.length * 0.05)], hi = sorted[Math.floor(sorted.length * 0.95)];
+    const contrast = hi - lo;
+    if (contrast > 25) {
+      const thr = (lo + hi) / 2, hyst = contrast * 0.1;
+      if (level === 0 && b > thr + hyst) level = 1;
+      else if (level === 1 && b < thr - hyst) level = 0;
+    } else level = 0;
+    decoder.push(t, level);
+    frameTimes.push(now);
+    while (frameTimes.length && frameTimes[0] < now - 1000) frameTimes.shift();
+    graph.push({ b, level, lo, hi });
+    if (graph.length > 240) graph.shift();
+    if (frameTimes.length % 5 === 0) {
+      $("sFps").textContent = frameTimes.length;
+      $("sContrast").textContent = Math.round(contrast);
+      if (contrast <= 25 && $("sState").textContent === "ממתין") $("sState").textContent = "אין אות";
+    }
+    drawGraph(graph);
+    schedule();
+  }
+  function schedule() { vfc ? video.requestVideoFrameCallback(onFrame) : requestAnimationFrame(n => onFrame(n)); }
+  schedule();
+  recv = {
+    stop() {
+      running = false;
+      stream.getTracks().forEach(tr => tr.stop());
+      video.srcObject = null;
+      $("btnCam").textContent = "הפעל מצלמה";
+      $("sState").textContent = "ממתין";
+      recv = null;
+    }
+  };
+}
+$("btnCam").onclick = startRecv;
+
+function renderLive(chars) {
+  const el = $("live");
+  el.textContent = "";
+  for (const c of chars) {
+    const s = document.createElement("span");
+    s.textContent = c.ch;
+    if (!c.ok) s.className = "err";
+    el.appendChild(s);
+  }
+}
+function addLog(m) {
+  const li = document.createElement("li");
+  li.className = m.ok ? "ok" : "bad";
+  li.textContent = m.text || "(ריק)";
+  const sm = document.createElement("small");
+  const bad = m.chars.filter(c => !c.ok).length;
+  sm.textContent = (m.ok ? "בדיקת שלמות עברה" : "בדיקת שלמות נכשלה") + (bad ? `, ${bad} תווים חשודים` : "") + " · " + new Date().toLocaleTimeString("he-IL");
+  li.appendChild(sm);
+  $("log").prepend(li);
+}
+function drawGraph(g) {
+  const c = $("graph"), x = c.getContext("2d");
+  const w = c.width, h = c.height;
+  x.clearRect(0, 0, w, h);
+  const css = getComputedStyle(document.documentElement);
+  x.strokeStyle = css.getPropertyValue("--muted"); x.lineWidth = 1.5;
+  x.beginPath();
+  g.forEach((p, i) => { const px = i / 240 * w, py = h - p.b / 255 * h; i ? x.lineTo(px, py) : x.moveTo(px, py); });
+  x.stroke();
+  x.strokeStyle = css.getPropertyValue("--accent"); x.lineWidth = 2;
+  x.beginPath();
+  g.forEach((p, i) => { const px = i / 240 * w, py = p.level ? 6 : h - 6; i ? x.lineTo(px, py) : x.moveTo(px, py); });
+  x.stroke();
+}
+</script>
+</body>
+</html>
