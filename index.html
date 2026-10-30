@@ -59,7 +59,7 @@ ul.log small { display: block; color: var(--muted); }
 <main>
   <div>
     <h1>אור שקט</h1>
-    <p class="sub">גרסה 4 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
+    <p class="sub">גרסה 5 · אב טיפוס: שליחת משפטים בהבהובי אור בחושך, ופענוח במצלמה של מכשיר שני.</p>
   </div>
 
   <div class="tabs" role="tablist">
@@ -349,7 +349,7 @@ async function startRecv() {
   $("btnCam").textContent = "עצור מצלמה";
   const T = +$("speedRecv").value;
   const cv = document.createElement("canvas");
-  cv.width = 96; cv.height = 72;
+  cv.width = 160; cv.height = 120;
   const ctx = cv.getContext("2d", { willReadFrequently: true });
   const hist = [];           // recent brightness values {t, b}
   const graph = [];          // for drawing
@@ -416,7 +416,7 @@ async function startRecv() {
     if (!base) base = Float32Array.from(means);
     if (prevMeans) for (let k = 0; k < means.length; k++) activity[k] = activity[k] * 0.99 + Math.abs(means[k] - prevMeans[k]);
     prevMeans = means;
-    const inSpot = k => !spot || (Math.abs((k % BW) * 8 + 4 - spot.x) <= 12 && Math.abs(Math.floor(k / BW) * 8 + 4 - spot.y) <= 12);
+    const inSpot = k => !spot || (Math.abs((k % BW) * 8 + 4 - spot.x) <= 20 && Math.abs(Math.floor(k / BW) * 8 + 4 - spot.y) <= 20);
     let bestK = -1;
     for (let k = 0; k < means.length; k++) if (inSpot(k) && (bestK < 0 || activity[k] > activity[bestK])) bestK = k;
     let sum = 0, n = 0;
